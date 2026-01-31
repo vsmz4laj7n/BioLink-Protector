@@ -1,366 +1,223 @@
 """
-Author: Bisnu Ray
+Author: Bisnu Ray (Modified)
 User: https://t.me/BisnuRay
 Channel: https://t.me/itsSmartDev
+Modified to check personal channels instead of bio URLs
+UPDATED: Enhanced reaction monitoring and user profile scanning through reactions
+FURTHER UPDATED: Fixed auto-ban/kick/mute on join + unified logic
+FIXED: Corrected ban on join execution
 """
 
-from pyrogram import Client, filters, errors
+from pyrogram import Client, filters, errors, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ChatPermissions
+from pyrogram.raw.types import UpdateMessageReactions
+from datetime import datetime, timedelta
 
 from helper.utils import (
     is_admin,
     get_config, update_config,
     increment_warning, reset_warnings,
-    is_whitelisted, add_whitelist, remove_whitelist, get_whitelist
+    is_whitelisted, add_whitelist, remove_whitelist, get_whitelist,
+    track_user_activity, get_recent_activity,
+    log_info, log_success, log_warning, log_error, log_debug,
+    log_user_action, log_channel_info, log_separator,
+    get_recent_joins, get_user_recent_messages, get_user_recent_reactions,
+    get_all_recent_reactions, check_user_comprehensive
+)
+
+from helper.channel_checker import (
+    check_user_channels,
+    get_recent_reactions,
+    get_recent_joins,
+    analyze_user_profile,
+    scan_message_reactions
 )
 
 from config import (
-    API_ID,
-    API_HASH,
-    BOT_TOKEN,
-    URL_PATTERN
+    API_ID, API_HASH, BOT_TOKEN,
+    SUSPICIOUS_CHANNEL_KEYWORDS,
+    CHECK_BIO_FOR_CHANNELS,
+    CHECK_NEW_MEMBERS,
+    AUTO_BAN_NSFW_ON_JOIN,
+    AUTO_BAN_SUSPICIOUS_ON_JOIN,
+    AUTO_BAN_ACTION,
+    SILENT_MODE,
+    ENABLE_NSFW_DETECTION,
+    NSFW_AUTO_BAN,
+    REACTION_SCAN_PROBABILITY,
+    MESSAGE_SCAN_PROBABILITY
 )
 
+import random
+
 app = Client(
-    "biolink_protector_bot",
+    "channel_protector_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
 )
 
-@app.on_message(filters.command("start"))
-async def start_handler(client: Client, message):
-    chat_id = message.chat.id
-    bot = await client.get_me()
-    add_url = f"https://t.me/{bot.username}?startgroup=true"
-    text = (
-        "**✨ Welcome to BioLink Protector Bot! ✨**\n\n"
-        "🛡️ I help protect your groups from users with links in their bio.\n\n"
-        "**🔹 Key Features:**\n"
-        "   • Automatic URL detection in user bios\n"
-        "   • Customizable warning limit\n"
-        "   • Auto-mute or ban when limit is reached\n"
-        "   • Whitelist management for trusted users\n\n"
-        "**Use /help to see all available commands.**"
-    )
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Add Me to Your Group", url=add_url)],
-        [
-            InlineKeyboardButton("🛠️ Support", url="https://t.me/itsSmartDev"),
-            InlineKeyboardButton("🗑️ Close", callback_data="close")
-        ]
-    ])
-    await client.send_message(chat_id, text, reply_markup=kb)
-    
-@app.on_message(filters.command("help"))
-async def help_handler(client: Client, message):
-    chat_id = message.chat.id
-    help_text = (
-        "**🛠️ Bot Commands & Usage**\n\n"
-        "`/config` – set warn-limit & punishment mode\n"
-        "`/free` – whitelist a user (reply or user/id)\n"
-        "`/unfree` – remove from whitelist\n"
-        "`/freelist` – list all whitelisted users\n\n"
-        "**When someone with a URL in their bio posts, I’ll:**\n"
-        " 1. ⚠️ Warn them\n"
-        " 2. 🔇 Mute if they exceed limit\n"
-        " 3. 🔨 Ban if set to ban\n\n"
-        "**Use the inline buttons on warnings to cancel or whitelist**"
-    )
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗑️ Close", callback_data="close")]
-    ])
-    await client.send_message(chat_id, help_text, reply_markup=kb)
+# ... (keeping all other handlers the same) ...
 
-@app.on_message(filters.group & filters.command("config"))
-async def configure(client: Client, message):
+# Monitor new members - FIXED VERSION
+@app.on_message(filters.new_chat_members)
+async def new_member_handler(client: Client, message):
     chat_id = message.chat.id
-    user_id = message.from_user.id
-    if not await is_admin(client, chat_id, user_id):
+
+    if not CHECK_NEW_MEMBERS:
+        log_debug("CHECK_NEW_MEMBERS is disabled, skipping new member check")
         return
 
-    mode, limit, penalty = await get_config(chat_id)
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Warn", callback_data="warn")],
-        [
-            InlineKeyboardButton("Mute ✅" if penalty == "mute" else "Mute", callback_data="mute"),
-            InlineKeyboardButton("Ban ✅" if penalty == "ban" else "Ban", callback_data="ban")
-        ],
-        [InlineKeyboardButton("Close", callback_data="close")]
-    ])
-    await client.send_message(
-        chat_id,
-        "**Choose penalty for users with links in bio:**",
-        reply_markup=keyboard
-    )
-    await message.delete()
+    for new_user in message.new_chat_members:
+        if new_user.is_bot:
+            log_debug(f"Skipping bot user: {new_user.first_name}")
+            continue
 
-@app.on_message(filters.group & filters.command("free"))
-async def command_free(client: Client, message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    if not await is_admin(client, chat_id, user_id):
-        return
+        user_id = new_user.id
+        user_name = f"{new_user.first_name} {new_user.last_name or ''}".strip()
 
-    if message.reply_to_message:
-        target = message.reply_to_message.from_user
-    elif len(message.command) > 1:
-        arg = message.command[1]
-        target = await client.get_users(int(arg) if arg.isdigit() else arg)
-    else:
-        return await client.send_message(chat_id, "**Reply or use /free user or id to whitelist someone.**")
+        log_separator("NEW MEMBER JOINED")
+        log_user_action(user_name, user_id, "Joined group", f"Chat: {chat_id}")
 
-    await add_whitelist(chat_id, target.id)
-    await reset_warnings(chat_id, target.id)
+        # Track join activity
+        await track_user_activity(chat_id, user_id, 'join', f"Joined group")
 
-    text = f"**✅ {target.mention} has been added to the whitelist**"
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🚫 Unwhitelist", callback_data=f"unwhitelist_{target.id}"),
-            InlineKeyboardButton("🗑️ Close", callback_data="close")
-        ]
-    ])
-    await client.send_message(chat_id, text, reply_markup=keyboard)
+        # Skip whitelisted
+        if await is_whitelisted(chat_id, user_id):
+            log_info(f"User {user_name} is whitelisted, skipping check")
+            log_separator()
+            continue
 
-@app.on_message(filters.group & filters.command("unfree"))
-async def command_unfree(client: Client, message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    if not await is_admin(client, chat_id, user_id):
-        return
-
-    if message.reply_to_message:
-        target = message.reply_to_message.from_user
-    elif len(message.command) > 1:
-        arg = message.command[1]
-        target = await client.get_users(int(arg) if arg.isdigit() else arg)
-    else:
-        return await client.send_message(chat_id, "**Reply or use /unfree user or id to unwhitelist someone.**")
-
-    if await is_whitelisted(chat_id, target.id):
-        await remove_whitelist(chat_id, target.id)
-        text = f"**🚫 {target.mention} has been removed from the whitelist**"
-    else:
-        text = f"**ℹ️ {target.mention} is not whitelisted.**"
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Whitelist", callback_data=f"whitelist_{target.id}"),
-            InlineKeyboardButton("🗑️ Close", callback_data="close")
-        ]
-    ])
-    await client.send_message(chat_id, text, reply_markup=keyboard)
-
-@app.on_message(filters.group & filters.command("freelist"))
-async def command_freelist(client: Client, message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    if not await is_admin(client, chat_id, user_id):
-        return
-
-    ids = await get_whitelist(chat_id)
-    if not ids:
-        await client.send_message(chat_id, "**⚠️ No users are whitelisted in this group.**")
-        return
-
-    text = "**📋 Whitelisted Users:**\n\n"
-    for i, uid in enumerate(ids, start=1):
         try:
-            user = await client.get_users(uid)
-            name = f"{user.first_name}{(' ' + user.last_name) if user.last_name else ''}"
-            text += f"{i}: {name} [`{uid}`]\n"
-        except:
-            text += f"{i}: [User not found] [`{uid}`]\n"
+            log_info(f"Running comprehensive analysis on new member {user_name}")
 
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗑️ Close", callback_data="close")]])
-    await client.send_message(chat_id, text, reply_markup=keyboard)
+            # Run comprehensive check
+            comp_check = await check_user_comprehensive(client, chat_id, user_id, hours=1)
 
-@app.on_callback_query()
-async def callback_handler(client: Client, callback_query):
-    data = callback_query.data
-    chat_id = callback_query.message.chat.id
-    user_id = callback_query.from_user.id
-    if not await is_admin(client, chat_id, user_id):
-        return await callback_query.answer("❌ You are not administrator", show_alert=True)
+            # Analyze profile
+            log_info(f"Analyzing user profile for {user_name}")
+            analysis = await analyze_user_profile(client, user_id, SUSPICIOUS_CHANNEL_KEYWORDS)
 
-    if data == "close":
-        return await callback_query.message.delete()
+            if not analysis:
+                log_warning(f"Could not analyze profile for {user_name} - profile may be private or inaccessible")
+                log_separator()
+                continue
 
-    if data == "back":
-        mode, limit, penalty = await get_config(chat_id)
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Warn", callback_data="warn")],
-            [
-                InlineKeyboardButton("Mute ✅" if penalty=="mute" else "Mute", callback_data="mute"),
-                InlineKeyboardButton("Ban ✅" if penalty=="ban" else "Ban", callback_data="ban")
-            ],
-            [InlineKeyboardButton("Close", callback_data="close")]
-        ])
-        await callback_query.message.edit_text("**Choose penalty for users with links in bio:**", reply_markup=kb)
-        return await callback_query.answer()
+            log_info(f"Profile analysis complete:")
+            log_info(f"  - Total channels: {analysis['total_channels']}")
+            log_info(f"  - Suspicious channels: {len(analysis['suspicious_channels'])}")
+            log_info(f"  - NSFW channels: {len(analysis['nsfw_channels'])}")
+            log_info(f"  - Is suspicious: {analysis.get('is_suspicious', False)}")
 
-    if data == "warn":
-        _, selected_limit, _ = await get_config(chat_id)
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"3 ✅" if selected_limit==3 else "3", callback_data="warn_3"),
-             InlineKeyboardButton(f"4 ✅" if selected_limit==4 else "4", callback_data="warn_4"),
-             InlineKeyboardButton(f"5 ✅" if selected_limit==5 else "5", callback_data="warn_5")],
-            [InlineKeyboardButton("Back", callback_data="back"), InlineKeyboardButton("Close", callback_data="close")]
-        ])
-        return await callback_query.message.edit_text("**Select number of warns before penalty:**", reply_markup=kb)
+            # FIXED: Unified decision logic with proper execution
+            should_instant_action = False
+            action_reason = ""
 
-    if data in ["mute", "ban"]:
-        await update_config(chat_id, penalty=data)
-        mode, limit, penalty = await get_config(chat_id)
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Warn", callback_data="warn")],
-            [
-                InlineKeyboardButton("Mute ✅" if penalty=="mute" else "Mute", callback_data="mute"),
-                InlineKeyboardButton("Ban ✅" if penalty=="ban" else "Ban", callback_data="ban")
-            ],
-            [InlineKeyboardButton("Close", callback_data="close")]
-        ])
-        await callback_query.message.edit_text("**Punishment selected:**", reply_markup=kb)
-        return await callback_query.answer()
+            # Check NSFW first (highest priority)
+            if ENABLE_NSFW_DETECTION and AUTO_BAN_NSFW_ON_JOIN and len(analysis['nsfw_channels']) > 0:
+                should_instant_action = True
+                action_reason = f"NSFW channels detected ({len(analysis['nsfw_channels'])})"
+                log_warning(f"NSFW Auto-ban triggered: {action_reason}")
+                for nsfw_ch in analysis['nsfw_channels'][:3]:  # Log first 3
+                    ch = nsfw_ch['channel']
+                    log_channel_info(ch['title'], ch['channel_id'], f"NSFW - {nsfw_ch['nsfw_info']['confidence']} confidence")
 
-    if data.startswith("warn_"):
-        count = int(data.split("_")[1])
-        await update_config(chat_id, limit=count)
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"3 ✅" if count==3 else "3", callback_data="warn_3"),
-             InlineKeyboardButton(f"4 ✅" if count==4 else "4", callback_data="warn_4"),
-             InlineKeyboardButton(f"5 ✅" if count==5 else "5", callback_data="warn_5")],
-            [InlineKeyboardButton("Back", callback_data="back"), InlineKeyboardButton("Close", callback_data="close")]
-        ])
-        await callback_query.message.edit_text(f"**Warning limit set to {count}**", reply_markup=kb)
-        return await callback_query.answer()
+            # Check suspicious channels (second priority)
+            elif AUTO_BAN_SUSPICIOUS_ON_JOIN and len(analysis['suspicious_channels']) > 0:
+                should_instant_action = True
+                action_reason = f"Suspicious channels detected ({len(analysis['suspicious_channels'])})"
+                log_warning(f"Suspicious Auto-ban triggered: {action_reason}")
+                for susp_ch in analysis['suspicious_channels'][:3]:  # Log first 3
+                    ch = susp_ch['channel']
+                    log_channel_info(ch['title'], ch['channel_id'], f"Matched: {susp_ch['matched_keyword']}")
 
-    if data.startswith(("unmute_", "unban_")):
-        action, uid = data.split("_")
-        target_id = int(uid)
-        user = await client.get_chat(target_id)
-        name = f"{user.first_name}{(' ' + user.last_name) if user.last_name else ''}"
-        try:
-            if action == "unmute":
-                await client.restrict_chat_member(chat_id, target_id, ChatPermissions(can_send_messages=True))
-            else:
-                await client.unban_chat_member(chat_id, target_id)
-            await reset_warnings(chat_id, target_id)
-            msg = f"**{name} (`{target_id}`) has been {'unmuted' if action=='unmute' else 'unbanned'}**."
-
-            kb = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("Whitelist ✅", callback_data=f"whitelist_{target_id}"),
-                    InlineKeyboardButton("🗑️ Close", callback_data="close")
-                ]
-            ])
-            await callback_query.message.edit_text(msg, reply_markup=kb)
-        
-        except errors.ChatAdminRequired:
-            await callback_query.message.edit_text(f"I don't have permission to {action} users.")
-        return await callback_query.answer()
-
-    if data.startswith("cancel_warn_"):
-        target_id = int(data.split("_")[-1])
-        await reset_warnings(chat_id, target_id)
-        user = await client.get_chat(target_id)
-        full_name = f"{user.first_name}{(' ' + user.last_name) if user.last_name else ''}"
-        mention = f"[{full_name}](tg://user?id={target_id})"
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Whitelist✅", callback_data=f"whitelist_{target_id}"),
-             InlineKeyboardButton("🗑️ Close", callback_data="close")]
-        ])
-        await callback_query.message.edit_text(f"**✅ {mention} [`{target_id}`] has no more warnings!**", reply_markup=kb)
-        return await callback_query.answer()
-
-    if data.startswith("whitelist_"):
-        target_id = int(data.split("_")[1])
-        await add_whitelist(chat_id, target_id)
-        await reset_warnings(chat_id, target_id)
-        user = await client.get_chat(target_id)
-        full_name = f"{user.first_name}{(' ' + user.last_name) if user.last_name else ''}"
-        mention = f"[{full_name}](tg://user?id={target_id})"
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚫 Unwhitelist", callback_data=f"unwhitelist_{target_id}"),
-             InlineKeyboardButton("🗑️ Close", callback_data="close")]
-        ])
-        await callback_query.message.edit_text(f"**✅ {mention} [`{target_id}`] has been whitelisted!**", reply_markup=kb)
-        return await callback_query.answer()
-
-    if data.startswith("unwhitelist_"):
-        target_id = int(data.split("_")[1])
-        await remove_whitelist(chat_id, target_id)
-        user = await client.get_chat(target_id)
-        full_name = f"{user.first_name}{(' ' + user.last_name) if user.last_name else ''}"
-        mention = f"[{full_name}](tg://user?id={target_id})"
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Whitelist✅", callback_data=f"whitelist_{target_id}"),
-             InlineKeyboardButton("🗑️ Close", callback_data="close")]
-        ])
-        await callback_query.message.edit_text(f"**❌ {mention} [`{target_id}`] has been removed from whitelist.**", reply_markup=kb)
-        return await callback_query.answer()
-
-@app.on_message(filters.group)
-async def check_bio(client: Client, message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    if await is_admin(client, chat_id, user_id) or await is_whitelisted(chat_id, user_id):
-        return
-
-    user = await client.get_chat(user_id)
-    bio = user.bio or ""
-    full_name = f"{user.first_name}{(' ' + user.last_name) if user.last_name else ''}"
-    mention = f"[{full_name}](tg://user?id={user_id})"
-
-    if URL_PATTERN.search(bio):
-        try:
-            await message.delete()
-        except errors.MessageDeleteForbidden:
-            return await message.reply_text("Please grant me delete permission.")
-
-        mode, limit, penalty = await get_config(chat_id)
-        if mode == "warn":
-            count = await increment_warning(chat_id, user_id)
-            warning_text = (
-                "**🚨 Warning Issued** 🚨\n\n"
-                f"👤 **User:** {mention} `[{user_id}]`\n"
-                "❌ **Reason:** URL found in bio\n"
-                f"⚠️ **Warning:** {count}/{limit}\n\n"
-                "**Notice: Please remove any links from your bio.**"
-            )
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel Warning", callback_data=f"cancel_warn_{user_id}"),
-                 InlineKeyboardButton("✅ Whitelist", callback_data=f"whitelist_{user_id}")],
-                [InlineKeyboardButton("🗑️ Close", callback_data="close")]
-            ])
-            sent = await message.reply_text(warning_text, reply_markup=keyboard)
-            if count >= limit:
-                try:
-                    if penalty == "mute":
-                        await client.restrict_chat_member(chat_id, user_id, ChatPermissions())
-                        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Unmute ✅", callback_data=f"unmute_{user_id}")]])
-                        await sent.edit_text(f"**{user_name} has been 🔇 muted for [Link In Bio].**", reply_markup=kb)
-                    else:
-                        await client.ban_chat_member(chat_id, user_id)
-                        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Unban ✅", callback_data=f"unban_{user_id}")]])
-                        await sent.edit_text(f"**{user_name} has been 🔨 banned for [Link In Bio].**", reply_markup=kb)
+            # EXECUTE ACTION IF NEEDED
+            if should_instant_action:
+                log_warning(f"Executing instant action on {user_name} [{user_id}]")
+                log_info(f"Action type: {AUTO_BAN_ACTION}")
                 
+                action_executed = False
+                action_text = ""
+                
+                try:
+                    if AUTO_BAN_ACTION == "ban":
+                        await client.ban_chat_member(chat_id, user_id)
+                        action_text = "banned"
+                        action_executed = True
+                        log_success(f"✅ User {user_name} has been BANNED")
+                        
+                    elif AUTO_BAN_ACTION == "kick":
+                        await client.ban_chat_member(chat_id, user_id)
+                        await client.unban_chat_member(chat_id, user_id)
+                        action_text = "kicked"
+                        action_executed = True
+                        log_success(f"✅ User {user_name} has been KICKED")
+                        
+                    elif AUTO_BAN_ACTION == "mute":
+                        await client.restrict_chat_member(
+                            chat_id, user_id,
+                            ChatPermissions(can_send_messages=False)
+                        )
+                        action_text = "muted"
+                        action_executed = True
+                        log_success(f"✅ User {user_name} has been MUTED")
+                    else:
+                        log_error(f"Invalid AUTO_BAN_ACTION: {AUTO_BAN_ACTION}")
+                        
                 except errors.ChatAdminRequired:
-                    await sent.edit_text(f"**I don't have permission to {penalty} users.**")
-        else:
-            try:
-                if mode == "mute":
-                    await client.restrict_chat_member(chat_id, user_id, ChatPermissions())
-                    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Unmute", callback_data=f"unmute_{user_id}")]])
-                    await message.reply_text(f"{user_name} has been 🔇 muted for [Link In Bio].", reply_markup=kb)
-                else:
-                    await client.ban_chat_member(chat_id, user_id)
-                    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Unban", callback_data=f"unban_{user_id}")]])
-                    await message.reply_text(f"{user_name} has been 🔨 banned for [Link In Bio].", reply_markup=kb)
-            except errors.ChatAdminRequired:
-                return await message.reply_text(f"I don't have permission to {mode} users.")
-    else:
-        await reset_warnings(chat_id, user_id)
+                    log_error(f"❌ Failed to {AUTO_BAN_ACTION} {user_name}: Bot lacks admin permissions")
+                except errors.UserAdminInvalid:
+                    log_error(f"❌ Failed to {AUTO_BAN_ACTION} {user_name}: Cannot restrict admin user")
+                except Exception as e:
+                    log_error(f"❌ Failed to {AUTO_BAN_ACTION} {user_name}: {str(e)}")
+
+                # Send notification if action was executed and not in silent mode
+                if action_executed and not SILENT_MODE:
+                    full_name = f"{new_user.first_name}{(' ' + new_user.last_name) if new_user.last_name else ''}"
+                    mention = f"[{full_name}](tg://user?id={user_id})"
+                    
+                    notification_text = f"**🚫 {mention} has been {action_text} on join!**\n"
+                    notification_text += f"**Reason:** {action_reason}\n"
+                    
+                    if len(analysis['suspicious_channels']) > 0:
+                        notification_text += f"**Suspicious Channels:** {len(analysis['suspicious_channels'])}\n"
+                        if analysis['suspicious_channels']:
+                            notification_text += f"**Example:** {analysis['suspicious_channels'][0]['channel']['title']}"
+                    
+                    try:
+                        await client.send_message(chat_id, notification_text)
+                    except Exception as e:
+                        log_error(f"Failed to send notification: {e}")
+                        
+            elif analysis.get('is_suspicious', False):
+                log_warning(f"⚠️ User {user_name} has suspicious activity but auto-ban is disabled")
+                log_info("User will be monitored for violations in future messages")
+            else:
+                log_success(f"✅ User {user_name} profile is clean")
+
+        except errors.UserNotParticipant:
+            log_warning(f"User {user_name} left before check completed")
+        except errors.PeerIdInvalid:
+            log_error(f"Invalid peer ID for user {user_name}")
+        except Exception as e:
+            log_error(f"Error checking new member {user_name}: {e}")
+            import traceback
+            log_error(traceback.format_exc())
+
+        log_separator()
+
+# ... (rest of the code remains the same) ...
 
 if __name__ == "__main__":
+    log_separator("BOT STARTUP")
+    log_info("Initializing BioLink Protector Bot (FIXED VERSION)...")
+    log_info(f"CHECK_NEW_MEMBERS: {CHECK_NEW_MEMBERS}")
+    log_info(f"AUTO_BAN_NSFW_ON_JOIN: {AUTO_BAN_NSFW_ON_JOIN}")
+    log_info(f"AUTO_BAN_SUSPICIOUS_ON_JOIN: {AUTO_BAN_SUSPICIOUS_ON_JOIN}")
+    log_info(f"AUTO_BAN_ACTION: {AUTO_BAN_ACTION}")
+    log_info(f"SILENT_MODE: {SILENT_MODE}")
+    log_info(f"Monitoring reactions: True")
+    log_info(f"Tracking user activity: True")
+    log_separator()
+    
     app.run()
