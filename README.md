@@ -1,78 +1,419 @@
-<h1 align="center">BioLink Protector Telegram Bot</h1>
+# BioLink Protector Bot - UPDATED VERSION
 
-<p align="center">
-  <a href="https://github.com/bisnuray/BioLink-Protector/stargazers"><img src="https://img.shields.io/github/stars/bisnuray/BioLink-Protector?color=blue&style=flat" alt="GitHub Repo stars"></a>
-  <a href="https://github.com/bisnuray/BioLink-Protector/issues"><img src="https://img.shields.io/github/issues/bisnuray/BioLink-Protector" alt="GitHub issues"></a>
-  <a href="https://github.com/bisnuray/BioLink-Protector/pulls"><img src="https://img.shields.io/github/issues-pr/bisnuray/BioLink-Protector" alt="GitHub pull requests"></a>
-  <a href="https://github.com/bisnuray/BioLink-Protector/graphs/contributors"><img src="https://img.shields.io/github/contributors/bisnuray/BioLink-Protector?style=flat" alt="GitHub contributors"></a>
-  <a href="https://github.com/bisnuray/BioLink-Protector/network/members"><img src="https://img.shields.io/github/forks/bisnuray/BioLink-Protector?style=flat" alt="GitHub forks"></a>
-</p>
+## 🎉 What's Fixed in This Version
 
-<p align="center">
-  <em>BioLink Protector is a Telegram bot Script that automatically monitors user bios in group chats for links. If a link is found in a user's bio, the bot can warn the user, mute them, or ban them based on configurable settings. This bot helps maintain a clean and safe environment in your Telegram group chats.
-</em>
-</p>
-<hr>
+This updated version fixes critical issues with **auto-ban** and **silent mode** functionality, plus adds new features:
 
-## Features
+### ✅ Fixed Issues:
 
-- Automatically checks user bios for links when they send a message in the group.
-- Configurable **warnings**, **mutes**, and **bans** for users with links in their bios.
-- **Whitelist** & **Unwhitelist** trusted members  
-- **Cancel Warning** reset a user’s warnings  
-- **Admin-only controls** with interactive inline keyboards
+1. **Auto-Ban Not Working**
+   - Previously checked generic `is_suspicious` flag
+   - Now specifically checks for NSFW channels
+   - Auto-ban now triggers immediately when NSFW channels are detected
 
-## 🎮 Demo Bot
+2. **Silent Mode Not Working**
+   - Check messages are now properly deleted for clean profiles
+   - Works correctly across all code paths
+   - Ban notifications still appear (only check message is deleted)
 
-Try it live: [@BioLinkProBot](https://t.me/BioLinkProBot)
+3. **Better Logic Flow**
+   - Clear separation between NSFW and suspicious content
+   - More accurate detection and response
+   - Improved message handling
 
-## Requirements
+### ✨ NEW Features:
 
-Before you begin, ensure you have met the following requirements:
+4. **Kick vs Ban Option**
+   - Choose between permanent ban or kick (user can rejoin)
+   - Configurable via `AUTO_BAN_ACTION` setting
+   - Options: `"ban"` (permanent) or `"kick"` (can rejoin)
 
-- Python 3.8 or higher
+5. **True Silent Mode**
+   - When enabled, NO checking messages appear in chat
+   - Only terminal/console logs are shown
+   - Completely silent for clean users
+   - Notifications still appear for NSFW/suspicious users
 
-## Installation
+---
 
-```bash
-git clone https://github.com/bisnuray/BioLink-Protector
-cd BioLink-Protector
-pip install -r requirements.txt
+## ⚡ Quick Configuration Guide
 
+### Most Common Settings
+
+**1. Strict Mode (Kick NSFW users, silent checking):**
+```python
+CHECK_NEW_MEMBERS = True
+AUTO_BAN_NSFW_ON_JOIN = True
+AUTO_BAN_ACTION = "kick"  # They can rejoin if cleaned up
+SILENT_MODE = True  # No checking messages in chat
 ```
 
-## Configuration
+**2. Stealth Mode (Ban NSFW users, completely silent):**
+```python
+CHECK_NEW_MEMBERS = True
+AUTO_BAN_NSFW_ON_JOIN = True
+AUTO_BAN_ACTION = "ban"  # Permanent ban
+SILENT_MODE = True  # No messages at all
+```
 
-1. Open the `config.py` file in your favorite text editor.  
-2. Replace the placeholders for `API_ID`, `API_HASH`, `BOT_TOKEN`, and `MONGO_URI` with your actual values:  
-   - **`API_ID`**: Your API ID from [my.telegram.org](https://my.telegram.org).  
-   - **`API_HASH`**: Your API Hash from [my.telegram.org](https://my.telegram.org).  
-   - **`BOT_TOKEN`**: The token you obtained from [@BotFather](https://t.me/BotFather).  
-   - **`MONGO_URI`**: Your MongoDB connection string (e.g., from [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)).  
+**3. Visible Mode (Show all checks to users):**
+```python
+CHECK_NEW_MEMBERS = True
+AUTO_BAN_NSFW_ON_JOIN = True
+AUTO_BAN_ACTION = "kick"
+SILENT_MODE = False  # All checks visible in chat
+```
 
-## Deploy the Bot
+**4. Manual Mode (No auto-actions, warnings only):**
+```python
+CHECK_NEW_MEMBERS = True
+AUTO_BAN_NSFW_ON_JOIN = False  # No auto-action
+SILENT_MODE = False
+DEFAULT_PUNISHMENT = "warn"  # Admins handle manually
+```
 
-```sh
+---
+
+## 📋 Features
+
+- ✅ Automatic detection of personal channels
+- ✅ NSFW channel detection with confidence scoring
+- ✅ Auto-ban for NSFW channels on join
+- ✅ Silent mode for clean user checks
+- ✅ Customizable warning system
+- ✅ Whitelist management
+- ✅ Suspicious keyword detection
+- ✅ Bio checking for channel mentions
+
+---
+
+## 🚀 Installation
+
+### Prerequisites
+
+1. Python 3.8 or higher
+2. MongoDB (local or cloud)
+3. Telegram Bot Token
+4. Telegram API ID and Hash
+
+### Step 1: Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Step 2: Configure MongoDB
+
+Make sure MongoDB is running:
+
+```bash
+# For local MongoDB
+mongod
+
+# Or use MongoDB Atlas (cloud)
+# Update MONGO_URI in config.py with your connection string
+```
+
+### Step 3: Edit Configuration
+
+Edit `config.py` and add your credentials:
+
+```python
+API_ID = "YOUR_API_ID"  # Get from https://my.telegram.org
+API_HASH = "YOUR_API_HASH"
+BOT_TOKEN = "YOUR_BOT_TOKEN"  # Get from @BotFather
+```
+
+### Step 4: Run the Bot
+
+```bash
 python bio.py
 ```
 
-## Usage
+---
 
-1. Add the bot to your group.  
-2. Grant the bot **Admin** rights (delete & restrict).  
-3. In-chat commands (admins only):  
-   - `/config` → choose “Warn”, “Mute”, or “Ban” and set warn count  
-   - `/free [reply|id]` → whitelist a user  
-   - `/unfree [reply|id]` → remove from whitelist  
-   - `/freelist` → view all whitelisted users  
-4. **Auto-scan:** When a non-whitelisted user posts, their bio is checked—warn/mute/ban applies.  
+## ⚙️ Configuration Options
 
+In `config.py`, you can customize:
 
-✨ **Note**: Fork this repo, & Star ☀️ the repo if you liked it. and Share this repo with Proper Credit
+### Auto-Ban Settings
+```python
+# NSFW Detection Settings
+ENABLE_NSFW_DETECTION = True  # Enable/disable NSFW detection
+NSFW_AUTO_BAN = True  # Auto-ban users with NSFW channels
 
-## Author
+# New Member Checking
+CHECK_NEW_MEMBERS = True  # Check members when they join
+AUTO_BAN_NSFW_ON_JOIN = True  # Auto-ban/kick new members with NSFW
+AUTO_BAN_ACTION = "kick"  # "kick" (can rejoin) or "ban" (permanent)
+SILENT_MODE = True  # True = No check messages in chat (terminal only)
+```
 
-- Name: Bisnu Ray
-- Telegram: [@itsSmartDev](https://t.me/itsSmartDev)
+### Warning System
+```python
+DEFAULT_WARNING_LIMIT = 3  # Number of warnings before action
+DEFAULT_PUNISHMENT = "mute"  # Options: "mute" or "ban"
+```
 
-Feel free to reach out if you have any questions or feedback.
+### Detection Keywords
+```python
+SUSPICIOUS_CHANNEL_KEYWORDS = [
+    "earn", "money", "crypto", "investment",
+    "trading", "forex", "bitcoin", "signals",
+    # Add your own keywords
+]
+```
+
+---
+
+## 📖 How It Works
+
+### New Member Joins (Silent Mode ON)
+
+1. **User joins group** → Bot checks profile (no message in chat, only terminal logs)
+2. **NSFW channel detected** → Immediate kick/ban + notification shown
+3. **Suspicious channel detected** → Warning message shown
+4. **Clean profile** → No messages at all (completely silent)
+
+### New Member Joins (Silent Mode OFF)
+
+1. **User joins group** → "🔍 Checking..." message appears
+2. **NSFW channel detected** → Immediate kick/ban, check msg deleted, notification shown
+3. **Suspicious channel detected** → Check message updated with warning
+4. **Clean profile** → Check message updated to "✅ Clean"
+
+### Kick vs Ban
+
+- **KICK** (`AUTO_BAN_ACTION = "kick"`): User is removed but can rejoin via invite link
+- **BAN** (`AUTO_BAN_ACTION = "ban"`): User is permanently banned, cannot rejoin
+
+### User Sends Message
+
+1. **Message sent** → Bot analyzes profile
+2. **NSFW/suspicious content found** → Message deleted, warning issued
+3. **Warnings exceed limit** → Mute or ban based on config
+4. **Clean profile** → Warnings reset
+
+---
+
+## 🎮 Bot Commands
+
+### Admin Commands
+
+- `/config` - Configure warning limit and punishment mode
+- `/free @user` - Whitelist a user (no checking)
+- `/unfree @user` - Remove from whitelist
+- `/freelist` - Show all whitelisted users
+- `/checkuser` - Check user's profile (reply to message)
+
+### User Commands
+
+- `/start` - Show welcome message
+- `/help` - Show help and commands
+
+---
+
+## 🔍 Expected Behavior
+
+### Scenario 1: User with NSFW Channel Joins (Silent Mode ON)
+```
+1. No message appears in chat
+2. Terminal shows: "🔍 Checking new member..."
+3. User is kicked/banned immediately
+4. "🚫 KICKED/BANNED: [User] - NSFW channel detected" (appears in chat)
+```
+
+### Scenario 2: User with NSFW Channel Joins (Silent Mode OFF)
+```
+1. "🔍 Checking new member..." (appears in chat)
+2. User is kicked/banned immediately
+3. Check message is deleted
+4. "🚫 KICKED/BANNED: [User] - NSFW channel detected" (appears in chat)
+```
+
+### Scenario 3: Clean User Joins (Silent Mode ON)
+```
+1. No message appears in chat at all
+2. Terminal shows: "✅ Profile is clean"
+3. Completely silent - no trace in chat
+```
+
+### Scenario 4: Clean User Joins (Silent Mode OFF)
+```
+1. "🔍 Checking new member..." (appears)
+2. "✅ [User] profile checked - Clean" (stays in chat)
+```
+
+### Scenario 5: Suspicious (Non-NSFW) User Joins
+```
+1. "🔍 Checking new member..." (if silent mode OFF)
+2. "⚠️ Warning: New member has suspicious channels..." (appears)
+3. User is monitored but NOT kicked/banned
+```
+
+### Terminal Output Example (Silent Mode ON)
+```
+==================================================
+🔍 Checking new member: John Doe (ID: 123456789)
+==================================================
+🔇 Silent mode: No message sent to chat
+🔎 Starting profile analysis...
+🔞 NSFW channels detected: 1 channel(s)
+  • Adult Content 18+ - Confidence: high
+
+⚠️  AUTO-KICK TRIGGERED for NSFW content
+✅ User kicked from group (can rejoin)
+🔇 Silent mode: Sending notification only
+✅ KICKED notification sent to chat
+==================================================
+```
+
+---
+
+## 📊 Terminal Logging
+
+When `SILENT_MODE = True`, all checking activity is logged to the terminal/console instead of the chat. This allows admins to monitor bot activity without cluttering the group.
+
+### What's Logged:
+
+- ✅ New member details (name, ID)
+- ✅ Profile analysis status
+- ✅ NSFW channel detection results
+- ✅ Suspicious channel findings
+- ✅ Actions taken (kick/ban/warning)
+- ✅ Message sending status
+- ✅ Errors and exceptions
+
+### Example Terminal Output:
+```
+==================================================
+🔍 Checking new member: John Doe (ID: 123456789)
+==================================================
+🔇 Silent mode: No message sent to chat
+🔎 Starting profile analysis...
+✅ Profile is clean - No violations found
+🔇 Silent mode: No messages sent (clean profile)
+==================================================
+```
+
+This makes it easy to monitor the bot's activity through server logs or console while keeping the group chat clean.
+
+---
+
+## 🛠️ Troubleshooting
+
+### Auto-ban not working?
+
+1. Check bot has ban permission in group
+2. Verify `AUTO_BAN_NSFW_ON_JOIN = True` in config.py
+3. Check console logs for errors
+4. Ensure NSFW detection is enabled
+
+### Kick not working / User still banned permanently?
+
+1. Verify `AUTO_BAN_ACTION = "kick"` in config.py (not "ban")
+2. Check bot has both ban AND unban permissions
+3. Kick = ban + immediate unban (allows rejoin)
+4. Check terminal logs for "User kicked" confirmation
+
+### Silent mode not working?
+
+1. Verify `SILENT_MODE = True` in config.py
+2. Check that no checking messages appear in chat
+3. Check terminal/console for log output
+4. Notifications for NSFW/suspicious users should still appear
+
+### NSFW detection too sensitive/loose?
+
+Adjust confidence thresholds in `helper/channel_checker.py`:
+
+```python
+# In check_if_nsfw_channel function
+if confidence_score >= 5:  # High confidence (default)
+    confidence = "high"
+elif confidence_score >= 3:  # Medium confidence
+    confidence = "medium"
+```
+
+Increase numbers for stricter detection, decrease for more sensitive.
+
+---
+
+## 📁 Project Structure
+
+```
+BioLink-Protector/
+├── bio.py                    # Main bot file (UPDATED)
+├── config.py                 # Configuration
+├── requirements.txt          # Dependencies
+└── helper/
+    ├── channel_checker.py    # Channel analysis functions
+    └── utils.py              # Database utilities
+```
+
+---
+
+## 🔐 Required Bot Permissions
+
+In your Telegram group, the bot needs:
+
+- ✅ Delete messages (for removing violating messages)
+- ✅ Ban users (for both ban and kick actions)
+- ✅ Unban users (required for kick feature to work)
+- ✅ Restrict members (for mute functionality)
+- ✅ Read message history
+
+**Note**: The "kick" feature works by banning then immediately unbanning, which allows the user to rejoin.
+
+---
+
+## 📝 Notes
+
+- The bot uses MongoDB to store warnings, punishments, and whitelist
+- Personal channel detection uses Telegram's official API
+- NSFW detection uses keyword matching and content analysis
+- All checks are non-intrusive and respect user privacy
+
+---
+
+## 💡 Tips
+
+1. **Test in a test group first** before deploying to production
+2. **Whitelist trusted users** to avoid false positives
+3. **Adjust keywords** based on your group's needs
+4. **Monitor logs** regularly for debugging
+5. **Keep MongoDB backed up** to preserve settings
+
+---
+
+## 📞 Support
+
+- Channel: https://t.me/itsSmartDev
+- Original Author: @BisnuRay
+- Modified by: BioLink Protector Team
+
+---
+
+## ⚖️ License
+
+This is a modified version of the original BioLink Protector bot.
+Use at your own discretion and comply with Telegram's Terms of Service.
+
+---
+
+## 🎯 Key Changes in This Update
+
+| Feature | Before | After |
+|---------|--------|-------|
+| Auto-ban trigger | Generic `is_suspicious` | Specific `nsfw_channels` check |
+| Silent mode | Temporarily shows message | No message at all (true silent) |
+| Check message on ban | Not deleted | Always deleted |
+| NSFW vs suspicious | Mixed together | Clearly separated |
+| Detection accuracy | Lower | Higher |
+| Ban action | Ban only | **NEW: Kick or Ban (configurable)** |
+| Terminal logging | Minimal | **NEW: Detailed logs** |
+
+---
+
+**Version**: 2.1 (Updated)  
+**Last Updated**: January 2026
